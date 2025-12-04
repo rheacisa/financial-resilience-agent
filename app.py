@@ -9,6 +9,9 @@ import streamlit as st
 from typing import Dict, Any
 import time
 
+# LangChain imports for message handling
+from langchain_core.messages import HumanMessage
+
 # Import our modules
 from financial_system import (
     get_financial_metrics,
@@ -283,8 +286,16 @@ def main():
             with st.chat_message("assistant"):
                 with st.spinner("🤖 Analyzing..."):
                     try:
-                        result = st.session_state.agent.invoke({"input": prompt})
-                        output = result.get("output", "")
+                        result = st.session_state.agent.invoke({"messages": [HumanMessage(content=prompt)]})
+                        
+                        # Extract output from messages
+                        output = ""
+                        if isinstance(result, dict) and "messages" in result:
+                            for msg in result["messages"]:
+                                if hasattr(msg, 'content'):
+                                    output += msg.content + "\n"
+                        else:
+                            output = str(result)
                         
                         # Format and display
                         assessment = format_agent_response(output)

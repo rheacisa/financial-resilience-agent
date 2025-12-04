@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 
 # LangChain imports
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.prebuilt import create_react_agent
 
 # Optional cloud LLM imports (commented out by default)
 # from langchain_anthropic import ChatAnthropic
@@ -44,7 +44,7 @@ def create_resilience_agent(verbose: bool = True):
         verbose: Whether to show agent reasoning process
     
     Returns:
-        Configured AgentExecutor
+        Configured agent executor
     """
     
     # Initialize LLM - Default to Ollama (local)
@@ -69,8 +69,8 @@ def create_resilience_agent(verbose: bool = True):
     #     api_key=os.getenv("OPENAI_API_KEY")
     # )
     
-    # Create comprehensive system prompt
-    system_prompt = """You are a Financial Cyber Resilience Agent specialized in assessing financial institutions' resilience against cyber threats and operational risks.
+    # Create comprehensive system message
+    system_message = """You are a Financial Cyber Resilience Agent specialized in assessing financial institutions' resilience against cyber threats and operational risks.
 
 Your mission is to provide comprehensive risk assessments by analyzing:
 - Financial health metrics and regulatory compliance
@@ -113,42 +113,13 @@ IMPORTANT RULES:
 - Provide specific, actionable recommendations
 - Consider both immediate and strategic actions
 - Note when regulatory notifications would be required
-- Format monetary values in millions USD (MM)
+- Format monetary values in millions USD (MM)"""
 
-You have access to the following tools:
-{tools}
-
-Tool names: {tool_names}
-
-Use this format:
-
-Question: the input question/scenario
-Thought: analyze what information you need
-Action: the action to take, must be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (repeat Thought/Action/Action Input/Observation as needed)
-Thought: I now have enough information to provide a comprehensive assessment
-Final Answer: [Provide complete assessment with all required elements]
-
-Begin!
-
-Question: {input}
-Thought: {agent_scratchpad}"""
-
-    prompt = ChatPromptTemplate.from_template(system_prompt)
-    
-    # Create agent
-    agent = create_tool_calling_agent(llm, ALL_TOOLS, prompt)
-    
-    # Create agent executor
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=ALL_TOOLS,
-        verbose=verbose,
-        handle_parsing_errors=True,
-        max_iterations=15,
-        max_execution_time=120
+    # Create agent using langgraph
+    agent_executor = create_react_agent(
+        llm, 
+        ALL_TOOLS,
+        prompt=system_message
     )
     
     return agent_executor
@@ -334,11 +305,19 @@ def main():
             
             print("\n🤖 Agent is analyzing...\n")
             
-            # Execute agent
-            result = agent.invoke({"input": user_input})
+            # Execute agent with new API
+            result = agent.invoke({"messages": [HumanMessage(content=user_input)]})
+            
+            # Extract output from messages
+            output = ""
+            if isinstance(result, dict) and "messages" in result:
+                for msg in result["messages"]:
+                    if hasattr(msg, 'content'):
+                        output += msg.content + "\n"
+            else:
+                output = str(result)
             
             # Extract and display results
-            output = result.get("output", "")
             assessment = extract_json_from_response(output)
             display_assessment(assessment, output)
             
