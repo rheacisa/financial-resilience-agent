@@ -6,6 +6,10 @@ AI-powered agent for financial cyber resilience assessment - powered by Ollama +
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![LangChain](https://img.shields.io/badge/LangChain-121212?style=for-the-badge)
 
+## 🌐 Live Demo
+
+**[https://resilience-agent.streamlit.app/](https://resilience-agent.streamlit.app/)**
+
 ## 🚀 Features
 
 - **Security Dashboard** - Real-time overview of your security posture
