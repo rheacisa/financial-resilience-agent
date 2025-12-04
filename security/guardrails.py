@@ -326,8 +326,10 @@ def detect_and_mask_pii(text: str) -> Tuple[GuardrailResult, str]:
     masked_text = text
     pii_found = []
     
-    # SSN patterns: XXX-XX-XXXX or XXXXXXXXX
-    ssn_pattern = r"\b\d{3}-\d{2}-\d{4}\b|\b\d{9}\b"
+    # SSN patterns: XXX-XX-XXXX (prioritize this format to reduce false positives)
+    # Note: Plain 9-digit pattern (\b\d{9}\b) may match phone numbers without separators
+    # In production, consider additional context validation or use specialized PII detection libraries
+    ssn_pattern = r"\b\d{3}-\d{2}-\d{4}\b"
     if re.search(ssn_pattern, masked_text):
         masked_text = re.sub(ssn_pattern, "[SSN_REDACTED]", masked_text)
         pii_found.append("SSN")
@@ -383,10 +385,14 @@ def detect_and_mask_pii(text: str) -> Tuple[GuardrailResult, str]:
         matches = re.findall(ip_pattern, masked_text)
         for match in matches:
             parts = match.split('.')
-            if all(0 <= int(part) <= 255 for part in parts):
-                masked_text = re.sub(re.escape(match), "[IP_REDACTED]", masked_text)
-                if "IP Address" not in pii_found:
-                    pii_found.append("IP Address")
+            try:
+                if all(0 <= int(part) <= 255 for part in parts):
+                    masked_text = re.sub(re.escape(match), "[IP_REDACTED]", masked_text)
+                    if "IP Address" not in pii_found:
+                        pii_found.append("IP Address")
+            except (ValueError, TypeError):
+                # Skip malformed IP patterns
+                continue
     
     if pii_found:
         result = GuardrailResult(
@@ -623,9 +629,9 @@ class GuardrailPipeline:
             text: Input text to hash
             
         Returns:
-            Hex string of SHA256 hash
+            Hex string of SHA256 hash (32 characters for better collision resistance)
         """
-        return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+        return hashlib.sha256(text.encode('utf-8')).hexdigest()[:32]
     
     def _log_event(self, event_type: str, input_text: str, result: str, 
                    threat_detected: Optional[str] = None, user_role: str = "system"):
@@ -671,7 +677,9 @@ class GuardrailPipeline:
             self._log_event("rate_limit_check", user_input, "BLOCKED", "rate_limit", user_role)
             return False, sanitized, results
         
-        # Check token limit (rough estimate: 4 chars per token)
+        # Check token limit
+        # Note: This is a simplified estimate (4 chars per token is approximate)
+        # For production, use tiktoken or similar for accurate tokenization
         estimated_tokens = len(user_input) // 4
         token_limit_result = self.rate_limiter.check_token_limit(estimated_tokens)
         results.append(token_limit_result)

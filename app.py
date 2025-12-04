@@ -190,6 +190,10 @@ def render_sidebar():
         help="Enable strict security validation"
     )
     
+    # Update guardrails strict mode if changed
+    if 'guardrails' in st.session_state:
+        st.session_state.guardrails.strict_mode = strict_mode
+    
     if strict_mode:
         st.sidebar.metric("Security Mode", "🛡️ STRICT", delta="Protected")
     else:

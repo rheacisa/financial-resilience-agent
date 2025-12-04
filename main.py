@@ -151,7 +151,9 @@ Please provide more specific details about your inquiry.
         Returns:
             Safe response or security block message
         """
-        print(f"📝 Processing query: {user_input[:80]}{'...' if len(user_input) > 80 else ''}")
+        # Display query preview (truncated for security - sensitive data not shown in full)
+        query_preview = user_input[:80] + '...' if len(user_input) > 80 else user_input
+        print(f"📝 Processing query: {query_preview}")
         print()
         
         # Step 1: Validate input with all guardrails
