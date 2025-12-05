@@ -1,6 +1,108 @@
 import streamlit as st
 import json
 from datetime import datetime
+import requests
+
+# --- Ollama Integration ---
+def check_ollama_available():
+    """Check if Ollama is running locally"""
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        return response.status_code == 200
+    except:
+        return False
+
+def get_ollama_models():
+    """Get list of available Ollama models"""
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            return [m["name"] for m in models]
+    except:
+        pass
+    return []
+
+def query_ollama(prompt, model="llama3.2", context=None):
+    """Send a query to Ollama and get response"""
+    try:
+        system_prompt = """You are a financial cyber resilience expert agent. You analyze security postures for financial institutions.
+
+When analyzing, consider:
+- Authentication mechanisms (MFA, SSO, password policies)
+- Data protection (encryption, access controls)
+- Compliance frameworks (PCI-DSS, SOC 2, GDPR, NIST CSF)
+- Network security (WAF, firewalls, segmentation)
+- Incident response readiness
+
+Provide specific, actionable recommendations with risk levels (High/Medium/Low) and timelines.
+Be concise but thorough. Use bullet points and tables when helpful."""
+
+        if context:
+            system_prompt += f"\n\nCurrent Security Profile:\n{context}"
+        
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "system": system_prompt,
+                "stream": False
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            return response.json().get("response", "No response generated")
+    except Exception as e:
+        return f"Error: {str(e)}"
+    return None
+
+def query_ollama_streaming(prompt, model="llama3.2", context=None):
+    """Send a query to Ollama and stream the response"""
+    try:
+        system_prompt = """You are a financial cyber resilience expert agent. You analyze security postures for financial institutions.
+
+When analyzing, consider:
+- Authentication mechanisms (MFA, SSO, password policies)
+- Data protection (encryption, access controls)
+- Compliance frameworks (PCI-DSS, SOC 2, GDPR, NIST CSF)
+- Network security (WAF, firewalls, segmentation)
+- Incident response readiness
+
+Provide specific, actionable recommendations with risk levels (High/Medium/Low) and timelines.
+Format your response with clear sections using markdown headers (###).
+Be concise but thorough."""
+
+        if context:
+            system_prompt += f"\n\nCurrent Security Profile:\n{context}"
+        
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "system": system_prompt,
+                "stream": True
+            },
+            stream=True,
+            timeout=120
+        )
+        
+        if response.status_code == 200:
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    if "response" in data:
+                        yield data["response"]
+                    if data.get("done", False):
+                        break
+    except Exception as e:
+        yield f"Error: {str(e)}"
+
+# Check Ollama status at startup
+OLLAMA_AVAILABLE = check_ollama_available()
+OLLAMA_MODELS = get_ollama_models() if OLLAMA_AVAILABLE else []
 
 # Page configuration - use centered layout for better mobile experience
 st.set_page_config(
@@ -165,7 +267,25 @@ with st.sidebar:
     gdpr_compliant = st.toggle("GDPR Compliant", value=True)
     
     st.divider()
-    st.info("🔒 Local AI - Data stays on-premise")
+    
+    # Ollama Status and Model Selection
+    st.subheader("🤖 AI Model")
+    if OLLAMA_AVAILABLE:
+        st.success("✅ Ollama Connected")
+        selected_model = st.selectbox(
+            "Select Model",
+            OLLAMA_MODELS if OLLAMA_MODELS else ["llama3.2"],
+            help="Choose which local LLM to use"
+        )
+        st.caption(f"Real AI reasoning enabled!")
+    else:
+        st.warning("⚠️ Ollama Not Running")
+        st.caption("Using simulation mode")
+        st.code("ollama serve", language="bash")
+        st.caption("Run this to enable real AI")
+        selected_model = None
+    
+    st.divider()
     st.caption("Built with Streamlit + LangChain + Ollama")
 
 # Calculate dynamic scores based on inputs
@@ -330,11 +450,32 @@ with tab1:
 with tab2:
     st.header("🤖 AI Agent Assessment")
     
-    st.markdown("Watch the agent reason through your security query in real-time.")
+    # Show mode indicator
+    if OLLAMA_AVAILABLE:
+        st.success("🟢 **Real AI Mode** - Ollama connected! Responses are generated by local LLM.")
+    else:
+        st.info("🔵 **Demo Mode** - Simulated agent. Run `ollama serve` locally for real AI.")
+    
+    st.markdown("Enter your security question and watch the agent analyze it.")
+    
+    # Sample queries dropdown
+    sample_queries = [
+        "-- Select a sample query --",
+        "Analyze our MFA implementation and identify gaps in coverage",
+        "What are the risks of our current password policy requiring only 8 characters?",
+        "Are we meeting PCI-DSS requirement 8.3 for multi-factor authentication?",
+        "What's a good incident response plan for a data breach?",
+        "Given our current security posture, what should we prioritize first?",
+        "Create a 90-day security improvement roadmap based on our gaps",
+    ]
+    
+    selected_sample = st.selectbox("💡 Try a sample query:", sample_queries)
     
     # Assessment input - full width for mobile
+    default_query = selected_sample if selected_sample != "-- Select a sample query --" else ""
     assessment_query = st.text_area(
         "What would you like to assess?",
+        value=default_query,
         placeholder="Example: Evaluate our authentication mechanisms...",
         height=120
     )
@@ -348,127 +489,202 @@ with tab2:
         if assessment_query:
             import time
             
-            # Agent Reasoning Display
-            if show_reasoning:
-                st.subheader("🧠 Agent Reasoning Process")
-                st.caption("ReAct Pattern: Reason → Act → Observe → Repeat")
+            # Build context from sidebar inputs
+            security_context = f"""
+- Industry: {industry_sector}
+- Employees: {num_employees}
+- Annual Revenue: {annual_revenue}
+- MFA Coverage: {mfa_coverage}%
+- SSO Enabled: {has_sso}
+- Data Encryption at Rest: {has_encryption}
+- Web Application Firewall: {has_waf}
+- Password Minimum Length: {password_min_length} characters
+- Session Timeout: {session_timeout} minutes
+- PCI-DSS Compliant: {pci_compliant}
+- SOC 2 Compliant: {soc2_compliant}
+- GDPR Compliant: {gdpr_compliant}
+- Current Risk Score: {overall_risk_score}/100 ({overall_status} Risk)
+"""
+            
+            # === REAL OLLAMA MODE ===
+            if OLLAMA_AVAILABLE and selected_model:
+                st.subheader("🧠 Real Agent Reasoning")
                 
-                reasoning_container = st.container()
+                # Step 1: Analyze Query
+                with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
+                    st.markdown(f"**Query:** {assessment_query}")
+                    st.markdown(f"**Model:** {selected_model}")
+                    st.markdown(f"**Context:** Using your security profile from sidebar")
+                    time.sleep(0.5)
+                    status.update(label="Step 1: Query Analysis ✅", state="complete")
                 
-                with reasoning_container:
-                    # Step 1: Parse Query
-                    with st.status("🔄 Agent thinking...", expanded=True) as status:
-                        st.markdown("**💭 Thought 1:** I need to analyze the user's security assessment request.")
-                        time.sleep(0.8)
-                        
-                        st.markdown(f"**📝 Observation:** User wants to assess: *\"{assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}\"*")
-                        time.sleep(0.5)
-                        
-                        st.markdown("**💭 Thought 2:** I should identify the key security domains involved.")
-                        time.sleep(0.8)
-                        
-                        # Determine domains based on query
-                        domains = []
-                        query_lower = assessment_query.lower()
-                        if any(word in query_lower for word in ['auth', 'login', 'password', 'mfa', '2fa']):
-                            domains.append("Authentication & Access Control")
-                        if any(word in query_lower for word in ['api', 'endpoint', 'token']):
-                            domains.append("API Security")
-                        if any(word in query_lower for word in ['data', 'encrypt', 'privacy']):
-                            domains.append("Data Protection")
-                        if any(word in query_lower for word in ['network', 'firewall', 'port']):
-                            domains.append("Network Security")
-                        if any(word in query_lower for word in ['compliance', 'pci', 'soc', 'gdpr']):
-                            domains.append("Compliance")
-                        if not domains:
-                            domains = ["General Security Assessment"]
-                        
-                        st.markdown(f"**🎯 Identified Domains:** {', '.join(domains)}")
-                        time.sleep(0.5)
-                        
-                        status.update(label="Step 1: Query Analysis ✅", state="complete")
-                    
-                    # Step 2: Tool Selection
-                    with st.status("🔄 Selecting tools...", expanded=True) as status:
-                        st.markdown("**💭 Thought 3:** Based on the domains, I need to select appropriate security tools.")
-                        time.sleep(0.7)
-                        
-                        st.markdown("**🔧 Action:** Selecting tools from toolkit...")
-                        time.sleep(0.5)
-                        
-                        tools_selected = [
-                            "🔍 `vulnerability_scanner` - Check for known CVEs",
-                            "🔐 `auth_analyzer` - Evaluate authentication mechanisms",
-                            "📊 `compliance_checker` - Cross-reference with frameworks",
-                            "🌐 `network_probe` - Assess network security posture"
-                        ]
-                        
-                        for tool in tools_selected[:3]:  # Show 3 relevant tools
-                            st.markdown(f"  • {tool}")
-                            time.sleep(0.3)
-                        
-                        status.update(label="Step 2: Tool Selection ✅", state="complete")
-                    
-                    # Step 3: Execute Tools
-                    with st.status("🔄 Running security scans...", expanded=True) as status:
-                        st.markdown("**💭 Thought 4:** Now I'll execute each tool and collect findings.")
-                        time.sleep(0.6)
-                        
-                        st.markdown("**🔧 Action:** `auth_analyzer.scan(target='customer_portal')`")
-                        time.sleep(0.8)
-                        st.markdown("**📝 Observation:** MFA coverage at 78%, session timeout 30min, OAuth 2.0 detected")
-                        time.sleep(0.5)
-                        
-                        st.markdown("**🔧 Action:** `vulnerability_scanner.check(scope='authentication')`")
-                        time.sleep(0.8)
-                        st.markdown("**📝 Observation:** 3 medium-severity issues found, 1 related to token refresh")
-                        time.sleep(0.5)
-                        
-                        if include_compliance:
-                            st.markdown("**🔧 Action:** `compliance_checker.evaluate(frameworks=['PCI-DSS', 'SOC2'])`")
-                            time.sleep(0.8)
-                            st.markdown("**📝 Observation:** PCI-DSS 8.3.1 partially met, SOC 2 CC6.1 compliant")
-                            time.sleep(0.5)
-                        
-                        status.update(label="Step 3: Tool Execution ✅", state="complete")
-                    
-                    # Step 4: Synthesize
-                    with st.status("🔄 Synthesizing results...", expanded=True) as status:
-                        st.markdown("**💭 Thought 5:** I have all the data. Now I'll synthesize findings and generate recommendations.")
-                        time.sleep(0.7)
-                        
-                        st.markdown("**🔧 Action:** Aggregating findings, calculating risk scores, prioritizing recommendations...")
-                        time.sleep(0.8)
-                        
-                        st.markdown("**📝 Final Observation:** Assessment complete. Generated 4 findings, 4 recommendations.")
-                        time.sleep(0.5)
-                        
-                        status.update(label="Step 4: Synthesis ✅", state="complete")
+                # Step 2: Build prompt
+                full_prompt = f"""Analyze this security question for a {industry_sector} organization:
+
+**Question:** {assessment_query}
+
+**Include in your analysis:**
+1. Key findings based on their security profile
+2. Risk assessment (High/Medium/Low) for each finding
+{"3. Compliance implications (PCI-DSS, SOC 2, GDPR, NIST)" if include_compliance else ""}
+{"4. Prioritized recommendations with timelines" if include_recommendations else ""}
+
+Be specific and actionable. Reference their actual metrics where relevant."""
+
+                # Step 3: Stream response from Ollama
+                with st.status("🔄 Step 2: Agent reasoning with LLM...", expanded=True) as status:
+                    st.markdown("**Sending to local LLM...**")
+                    time.sleep(0.3)
+                    status.update(label="Step 2: LLM Processing ✅", state="complete")
                 
-                st.divider()
+                st.subheader("📋 Agent Response")
+                
+                # Stream the response
+                response_container = st.empty()
+                full_response = ""
+                
+                with st.spinner("🤖 Generating response..."):
+                    for chunk in query_ollama_streaming(full_prompt, selected_model, security_context):
+                        full_response += chunk
+                        response_container.markdown(full_response + "▌")
+                
+                response_container.markdown(full_response)
+                
+                # Agent Summary
+                with st.expander("🤖 Agent Metadata"):
+                    st.markdown(f"""
+**Mode:** Real AI (Ollama)
+**Model:** {selected_model}
+**Query:** {assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}
+**Context Provided:** Security profile from sidebar
+**Data Privacy:** ✅ All processing done locally - no data sent to cloud
+                    """)
+            
+            # === SIMULATION MODE ===
             else:
-                with st.spinner("AI Agent analyzing your security posture..."):
-                    time.sleep(2)
-            
-            st.success("✅ Assessment Complete!")
-            
-            # Results - Using actual sidebar inputs
-            st.subheader("📋 Assessment Results")
-            
-            with st.expander("🔍 Findings (Based on Your Data)", expanded=True):
-                # Dynamic MFA finding
-                mfa_status = "🟢" if mfa_coverage >= 95 else "🟡" if mfa_coverage >= 70 else "🔴"
-                mfa_risk = "Low" if mfa_coverage >= 95 else "Medium" if mfa_coverage >= 70 else "High"
+                # Agent Reasoning Display
+                if show_reasoning:
+                    st.subheader("🧠 Agent Reasoning Process (Simulation)")
+                    st.caption("ReAct Pattern: Reason → Act → Observe → Repeat")
+                    
+                    reasoning_container = st.container()
+                    
+                    with reasoning_container:
+                        # Step 1: Parse Query
+                        with st.status("🔄 Agent thinking...", expanded=True) as status:
+                            st.markdown("**💭 Thought 1:** I need to analyze the user's security assessment request.")
+                            time.sleep(0.8)
+                            
+                            st.markdown(f"**📝 Observation:** User wants to assess: *\"{assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}\"*")
+                            time.sleep(0.5)
+                            
+                            st.markdown("**💭 Thought 2:** I should identify the key security domains involved.")
+                            time.sleep(0.8)
+                            
+                            # Determine domains based on query
+                            domains = []
+                            query_lower = assessment_query.lower()
+                            if any(word in query_lower for word in ['auth', 'login', 'password', 'mfa', '2fa']):
+                                domains.append("Authentication & Access Control")
+                            if any(word in query_lower for word in ['api', 'endpoint', 'token']):
+                                domains.append("API Security")
+                            if any(word in query_lower for word in ['data', 'encrypt', 'privacy']):
+                                domains.append("Data Protection")
+                            if any(word in query_lower for word in ['network', 'firewall', 'port']):
+                                domains.append("Network Security")
+                            if any(word in query_lower for word in ['compliance', 'pci', 'soc', 'gdpr']):
+                                domains.append("Compliance")
+                            if not domains:
+                                domains = ["General Security Assessment"]
+                            
+                            st.markdown(f"**🎯 Identified Domains:** {', '.join(domains)}")
+                            time.sleep(0.5)
+                            
+                            status.update(label="Step 1: Query Analysis ✅", state="complete")
+                        
+                        # Step 2: Tool Selection
+                        with st.status("🔄 Selecting tools...", expanded=True) as status:
+                            st.markdown("**💭 Thought 3:** Based on the domains, I need to select appropriate security tools.")
+                            time.sleep(0.7)
+                            
+                            st.markdown("**🔧 Action:** Selecting tools from toolkit...")
+                            time.sleep(0.5)
+                            
+                            tools_selected = [
+                                "🔍 `vulnerability_scanner` - Check for known CVEs",
+                                "🔐 `auth_analyzer` - Evaluate authentication mechanisms",
+                                "📊 `compliance_checker` - Cross-reference with frameworks",
+                                "🌐 `network_probe` - Assess network security posture"
+                            ]
+                            
+                            for tool in tools_selected[:3]:  # Show 3 relevant tools
+                                st.markdown(f"  • {tool}")
+                                time.sleep(0.3)
+                            
+                            status.update(label="Step 2: Tool Selection ✅", state="complete")
+                        
+                        # Step 3: Execute Tools
+                        with st.status("🔄 Running security scans...", expanded=True) as status:
+                            st.markdown("**💭 Thought 4:** Now I'll execute each tool and collect findings.")
+                            time.sleep(0.6)
+                            
+                            st.markdown(f"**🔧 Action:** `auth_analyzer.scan(target='customer_portal')`")
+                            time.sleep(0.8)
+                            st.markdown(f"**📝 Observation:** MFA coverage at {mfa_coverage}%, session timeout {session_timeout}min, {'SSO' if has_sso else 'no SSO'} detected")
+                            time.sleep(0.5)
+                            
+                            st.markdown("**🔧 Action:** `vulnerability_scanner.check(scope='authentication')`")
+                            time.sleep(0.8)
+                            st.markdown(f"**📝 Observation:** {vulnerabilities} issues found based on current configuration")
+                            time.sleep(0.5)
+                            
+                            if include_compliance:
+                                st.markdown("**🔧 Action:** `compliance_checker.evaluate(frameworks=['PCI-DSS', 'SOC2'])`")
+                                time.sleep(0.8)
+                                pci_msg = "PCI-DSS compliant" if pci_compliant else "PCI-DSS gaps found"
+                                soc2_msg = "SOC 2 compliant" if soc2_compliant else "SOC 2 gaps found"
+                                st.markdown(f"**📝 Observation:** {pci_msg}, {soc2_msg}")
+                                time.sleep(0.5)
+                            
+                            status.update(label="Step 3: Tool Execution ✅", state="complete")
+                        
+                        # Step 4: Synthesize
+                        with st.status("🔄 Synthesizing results...", expanded=True) as status:
+                            st.markdown("**💭 Thought 5:** I have all the data. Now I'll synthesize findings and generate recommendations.")
+                            time.sleep(0.7)
+                            
+                            st.markdown("**🔧 Action:** Aggregating findings, calculating risk scores, prioritizing recommendations...")
+                            time.sleep(0.8)
+                            
+                            st.markdown(f"**📝 Final Observation:** Assessment complete. Risk score: {overall_risk_score}/100.")
+                            time.sleep(0.5)
+                            
+                            status.update(label="Step 4: Synthesis ✅", state="complete")
+                    
+                    st.divider()
+                else:
+                    with st.spinner("AI Agent analyzing your security posture..."):
+                        time.sleep(2)
                 
-                # Dynamic password finding
-                pwd_status = "🟢" if password_min_length >= 12 else "🟡" if password_min_length >= 10 else "🔴"
-                pwd_risk = "Low" if password_min_length >= 12 else "Medium" if password_min_length >= 10 else "High"
+                st.success("✅ Assessment Complete (Simulation Mode)")
                 
-                # Dynamic session finding
-                sess_status = "🟢" if session_timeout <= 30 else "🟡" if session_timeout <= 60 else "🔴"
-                sess_risk = "Low" if session_timeout <= 30 else "Medium" if session_timeout <= 60 else "High"
+                # Results - Using actual sidebar inputs
+                st.subheader("📋 Assessment Results")
                 
-                st.markdown(f"""
+                with st.expander("🔍 Findings (Based on Your Data)", expanded=True):
+                    # Dynamic MFA finding
+                    mfa_status = "🟢" if mfa_coverage >= 95 else "🟡" if mfa_coverage >= 70 else "🔴"
+                    mfa_risk = "Low" if mfa_coverage >= 95 else "Medium" if mfa_coverage >= 70 else "High"
+                    
+                    # Dynamic password finding
+                    pwd_status = "🟢" if password_min_length >= 12 else "🟡" if password_min_length >= 10 else "🔴"
+                    pwd_risk = "Low" if password_min_length >= 12 else "Medium" if password_min_length >= 10 else "High"
+                    
+                    # Dynamic session finding
+                    sess_status = "🟢" if session_timeout <= 30 else "🟡" if session_timeout <= 60 else "🔴"
+                    sess_risk = "Low" if session_timeout <= 30 else "Medium" if session_timeout <= 60 else "High"
+                    
+                    st.markdown(f"""
 ### Key Findings
 
 Based on your organization's security profile:
@@ -492,76 +708,78 @@ Based on your organization's security profile:
    - SSO: {"✅ Enabled" if has_sso else "❌ Not enabled"}
    - Encryption at Rest: {"✅ Enabled" if has_encryption else "❌ Not enabled"}
    - WAF: {"✅ Deployed" if has_waf else "❌ Not deployed"}
-                """)
-            
-            if include_compliance:
-                with st.expander("📋 Compliance Status (Your Profile)"):
-                    pci_status = "✅ Compliant" if pci_compliant else "❌ Non-compliant"
-                    soc2_status = "✅ Compliant" if soc2_compliant else "❌ Non-compliant"
-                    gdpr_status = "✅ Compliant" if gdpr_compliant else "❌ Non-compliant"
-                    
-                    # Calculate coverage based on inputs
-                    pci_coverage = 60 + (20 if mfa_coverage >= 80 else 0) + (10 if has_encryption else 0) + (10 if password_min_length >= 12 else 0)
-                    soc2_coverage = 70 + (15 if has_encryption else 0) + (15 if session_timeout <= 30 else 0)
-                    gdpr_coverage = 65 + (20 if has_encryption else 0) + (15 if gdpr_compliant else 0)
-                    
-                    st.markdown(f"""
+                    """)
+                
+                if include_compliance:
+                    with st.expander("📋 Compliance Status (Your Profile)"):
+                        pci_status = "✅ Compliant" if pci_compliant else "❌ Non-compliant"
+                        soc2_status = "✅ Compliant" if soc2_compliant else "❌ Non-compliant"
+                        gdpr_status = "✅ Compliant" if gdpr_compliant else "❌ Non-compliant"
+                        
+                        # Calculate coverage based on inputs
+                        pci_coverage = 60 + (20 if mfa_coverage >= 80 else 0) + (10 if has_encryption else 0) + (10 if password_min_length >= 12 else 0)
+                        soc2_coverage = 70 + (15 if has_encryption else 0) + (15 if session_timeout <= 30 else 0)
+                        gdpr_coverage = 65 + (20 if has_encryption else 0) + (15 if gdpr_compliant else 0)
+                        
+                        st.markdown(f"""
 | Framework | Certification | Est. Coverage | Key Gap |
 |-----------|---------------|---------------|---------|
 | PCI-DSS | {pci_status} | {min(100, pci_coverage)}% | {"Req 8.3.1 - MFA" if mfa_coverage < 100 else "-"} |
 | SOC 2 | {soc2_status} | {min(100, soc2_coverage)}% | {"CC6.1 - Encryption" if not has_encryption else "-"} |
 | GDPR | {gdpr_status} | {min(100, gdpr_coverage)}% | {"-" if gdpr_compliant else "Art. 32 - Security"} |
 | NIST CSF | ⚠️ Partial | {overall_risk_score}% | {"PR.AC-7 - Access" if access_score < 70 else "-"} |
-                    """)
-            
-            if include_recommendations:
-                with st.expander("💡 Recommendations (Personalized)", expanded=True):
-                    st.markdown("### 🎯 Priority Actions For Your Organization")
-                    
-                    recs = []
-                    if mfa_coverage < 100:
-                        priority = "🔴 High" if mfa_coverage < 80 else "🟡 Medium"
-                        recs.append(f"| {priority} | Extend MFA to remaining {100-mfa_coverage}% of accounts | 14 days | +{int((100-mfa_coverage)*0.3)} pts |")
-                    
-                    if password_min_length < 12:
-                        recs.append(f"| 🔴 High | Increase password minimum to 12 characters (currently {password_min_length}) | 7 days | +5 pts |")
-                    
-                    if not has_waf:
-                        recs.append("| 🔴 High | Deploy Web Application Firewall | 30 days | +8 pts |")
-                    
-                    if not has_encryption:
-                        recs.append("| 🔴 High | Enable data encryption at rest | 21 days | +10 pts |")
-                    
-                    if session_timeout > 30:
-                        recs.append(f"| 🟡 Medium | Reduce session timeout from {session_timeout} to 30 min | 7 days | +3 pts |")
-                    
-                    if not has_sso:
-                        recs.append("| 🟢 Low | Implement Single Sign-On (SSO) | 60 days | +5 pts |")
-                    
-                    if recs:
-                        st.markdown("""
+                        """)
+                
+                if include_recommendations:
+                    with st.expander("💡 Recommendations (Personalized)", expanded=True):
+                        st.markdown("### 🎯 Priority Actions For Your Organization")
+                        
+                        recs = []
+                        if mfa_coverage < 100:
+                            priority = "🔴 High" if mfa_coverage < 80 else "🟡 Medium"
+                            recs.append(f"| {priority} | Extend MFA to remaining {100-mfa_coverage}% of accounts | 14 days | +{int((100-mfa_coverage)*0.3)} pts |")
+                        
+                        if password_min_length < 12:
+                            recs.append(f"| 🔴 High | Increase password minimum to 12 characters (currently {password_min_length}) | 7 days | +5 pts |")
+                        
+                        if not has_waf:
+                            recs.append("| 🔴 High | Deploy Web Application Firewall | 30 days | +8 pts |")
+                        
+                        if not has_encryption:
+                            recs.append("| 🔴 High | Enable data encryption at rest | 21 days | +10 pts |")
+                        
+                        if session_timeout > 30:
+                            recs.append(f"| 🟡 Medium | Reduce session timeout from {session_timeout} to 30 min | 7 days | +3 pts |")
+                        
+                        if not has_sso:
+                            recs.append("| 🟢 Low | Implement Single Sign-On (SSO) | 60 days | +5 pts |")
+                        
+                        if recs:
+                            st.markdown("""
 | Priority | Action | Timeline | Impact |
 |----------|--------|----------|--------|
 """ + "\n".join(recs))
-                        
-                        # Calculate projected improvement
-                        potential_gain = 0
-                        if mfa_coverage < 100: potential_gain += int((100-mfa_coverage)*0.3)
-                        if password_min_length < 12: potential_gain += 5
-                        if not has_waf: potential_gain += 8
-                        if not has_encryption: potential_gain += 10
-                        
-                        new_score = min(100, overall_risk_score + potential_gain)
-                        st.markdown(f"""
+                            
+                            # Calculate projected improvement
+                            potential_gain = 0
+                            if mfa_coverage < 100: potential_gain += int((100-mfa_coverage)*0.3)
+                            if password_min_length < 12: potential_gain += 5
+                            if not has_waf: potential_gain += 8
+                            if not has_encryption: potential_gain += 10
+                            
+                            new_score = min(100, overall_risk_score + potential_gain)
+                            st.markdown(f"""
 ### 📊 Projected Improvement
 Implementing all recommendations will improve your risk score from **{overall_risk_score} → {new_score}** (+{potential_gain} points)
-                        """)
-                    else:
-                        st.success("🎉 Great job! No critical recommendations. Your security posture is strong.")
-            
-            # Agent Summary
-            with st.expander("🤖 Agent Summary"):
-                st.markdown(f"""
+                            """)
+                        else:
+                            st.success("🎉 Great job! No critical recommendations. Your security posture is strong.")
+                
+                # Agent Summary
+                with st.expander("🤖 Agent Summary"):
+                    st.markdown(f"""
+**Mode:** Simulation (Ollama not connected)
+
 **Query Analyzed:** {assessment_query[:150]}{'...' if len(assessment_query) > 150 else ''}
 
 **Organization:** {industry_sector} | {num_employees} employees | {annual_revenue}
@@ -577,8 +795,8 @@ Implementing all recommendations will improve your risk score from **{overall_ri
 
 **Current Risk Score:** {overall_risk_score}/100 ({overall_status} Risk)
 
-**Model:** Ollama (Local LLM - Your data never leaves your infrastructure)
-                """)
+💡 *Run `ollama serve` locally for real AI-powered analysis!*
+                    """)
         else:
             st.warning("Please describe what you'd like to assess.")
 
