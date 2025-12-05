@@ -1,7 +1,119 @@
 import streamlit as st
 import json
+import os
 from datetime import datetime
 import requests
+
+# --- Configuration ---
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+
+# Available Groq models
+GROQ_MODELS = {
+    "llama-3.3-70b-versatile": "Llama 3.3 70B (Best quality)",
+    "llama-3.1-8b-instant": "Llama 3.1 8B (Fastest)",
+    "mixtral-8x7b-32768": "Mixtral 8x7B (Long context)",
+}
+
+# System prompt for security agent
+SYSTEM_PROMPT = """You are a financial cyber resilience expert agent. You analyze security postures for financial institutions.
+
+When analyzing, consider:
+- Authentication mechanisms (MFA, SSO, password policies)
+- Data protection (encryption, access controls)
+- Compliance frameworks (PCI-DSS, SOC 2, GDPR, NIST CSF)
+- Network security (WAF, firewalls, segmentation)
+- Incident response readiness
+
+Provide specific, actionable recommendations with risk levels (High/Medium/Low) and timelines.
+Format your response with clear sections using markdown headers (###).
+Be concise but thorough. Use bullet points and tables when helpful."""
+
+# --- Groq Integration ---
+def query_groq(prompt, model="llama-3.3-70b-versatile", context=None):
+    """Send a query to Groq API and get response"""
+    if not GROQ_API_KEY:
+        return None
+    
+    try:
+        system = SYSTEM_PROMPT
+        if context:
+            system += f"\n\nCurrent Security Profile:\n{context}"
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2048
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            return f"Error: {response.status_code} - {response.text}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def query_groq_streaming(prompt, model="llama-3.3-70b-versatile", context=None):
+    """Send a query to Groq API and stream the response"""
+    if not GROQ_API_KEY:
+        yield "Error: No Groq API key configured"
+        return
+    
+    try:
+        system = SYSTEM_PROMPT
+        if context:
+            system += f"\n\nCurrent Security Profile:\n{context}"
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2048,
+                "stream": True
+            },
+            stream=True,
+            timeout=120
+        )
+        
+        if response.status_code == 200:
+            for line in response.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        data_str = line_text[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            if "content" in delta:
+                                yield delta["content"]
+                        except json.JSONDecodeError:
+                            continue
+        else:
+            yield f"Error: {response.status_code}"
+    except Exception as e:
+        yield f"Error: {str(e)}"
 
 # --- Ollama Integration ---
 def check_ollama_available():
@@ -23,66 +135,19 @@ def get_ollama_models():
         pass
     return []
 
-def query_ollama(prompt, model="llama3.2", context=None):
-    """Send a query to Ollama and get response"""
-    try:
-        system_prompt = """You are a financial cyber resilience expert agent. You analyze security postures for financial institutions.
-
-When analyzing, consider:
-- Authentication mechanisms (MFA, SSO, password policies)
-- Data protection (encryption, access controls)
-- Compliance frameworks (PCI-DSS, SOC 2, GDPR, NIST CSF)
-- Network security (WAF, firewalls, segmentation)
-- Incident response readiness
-
-Provide specific, actionable recommendations with risk levels (High/Medium/Low) and timelines.
-Be concise but thorough. Use bullet points and tables when helpful."""
-
-        if context:
-            system_prompt += f"\n\nCurrent Security Profile:\n{context}"
-        
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "system": system_prompt,
-                "stream": False
-            },
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            return response.json().get("response", "No response generated")
-    except Exception as e:
-        return f"Error: {str(e)}"
-    return None
-
 def query_ollama_streaming(prompt, model="llama3.2", context=None):
     """Send a query to Ollama and stream the response"""
     try:
-        system_prompt = """You are a financial cyber resilience expert agent. You analyze security postures for financial institutions.
-
-When analyzing, consider:
-- Authentication mechanisms (MFA, SSO, password policies)
-- Data protection (encryption, access controls)
-- Compliance frameworks (PCI-DSS, SOC 2, GDPR, NIST CSF)
-- Network security (WAF, firewalls, segmentation)
-- Incident response readiness
-
-Provide specific, actionable recommendations with risk levels (High/Medium/Low) and timelines.
-Format your response with clear sections using markdown headers (###).
-Be concise but thorough."""
-
+        system = SYSTEM_PROMPT
         if context:
-            system_prompt += f"\n\nCurrent Security Profile:\n{context}"
+            system += f"\n\nCurrent Security Profile:\n{context}"
         
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
                 "model": model,
                 "prompt": prompt,
-                "system": system_prompt,
+                "system": system,
                 "stream": True
             },
             stream=True,
@@ -100,9 +165,18 @@ Be concise but thorough."""
     except Exception as e:
         yield f"Error: {str(e)}"
 
-# Check Ollama status at startup
+# Check availability at startup
 OLLAMA_AVAILABLE = check_ollama_available()
 OLLAMA_MODELS = get_ollama_models() if OLLAMA_AVAILABLE else []
+GROQ_AVAILABLE = bool(GROQ_API_KEY)
+
+# Determine active mode priority: Ollama (local/production) > Groq (cloud demo) > Simulation
+if OLLAMA_AVAILABLE:
+    ACTIVE_MODE = "ollama"
+elif GROQ_AVAILABLE:
+    ACTIVE_MODE = "groq"
+else:
+    ACTIVE_MODE = "simulation"
 
 # Page configuration - use centered layout for better mobile experience
 st.set_page_config(
@@ -268,25 +342,51 @@ with st.sidebar:
     
     st.divider()
     
-    # Ollama Status and Model Selection
-    st.subheader("🤖 AI Model")
+    # AI Model Status and Selection
+    st.subheader("🤖 AI Engine")
+    
     if OLLAMA_AVAILABLE:
-        st.success("✅ Ollama Connected")
+        st.success("✅ Ollama Connected (Local)")
+        ai_mode = "ollama"
         selected_model = st.selectbox(
             "Select Model",
             OLLAMA_MODELS if OLLAMA_MODELS else ["llama3.2"],
             help="Choose which local LLM to use"
         )
-        st.caption(f"Real AI reasoning enabled!")
+        st.caption("🏠 Running locally - production ready!")
+    elif GROQ_AVAILABLE:
+        st.success("✅ Groq Cloud Connected")
+        ai_mode = "groq"
+        model_options = list(GROQ_MODELS.keys())
+        model_labels = list(GROQ_MODELS.values())
+        selected_idx = st.selectbox(
+            "Select Model",
+            range(len(model_options)),
+            format_func=lambda i: model_labels[i],
+            help="Choose which cloud LLM to use"
+        )
+        selected_model = model_options[selected_idx]
+        st.caption("☁️ Cloud AI - great for demos!")
     else:
-        st.warning("⚠️ Ollama Not Running")
-        st.caption("Using simulation mode")
-        st.code("ollama serve", language="bash")
-        st.caption("Run this to enable real AI")
+        st.info("🎭 Simulation Mode")
+        st.caption("No AI backend detected")
+        ai_mode = "simulation"
         selected_model = None
+        
+        with st.expander("Enable Real AI"):
+            st.markdown("""
+            **Option 1: Local (Ollama)**
+            ```bash
+            ollama serve
+            ```
+            
+            **Option 2: Cloud (Groq)**
+            1. Get free API key at [console.groq.com](https://console.groq.com)
+            2. Add to Streamlit secrets
+            """)
     
     st.divider()
-    st.caption("Built with Streamlit + LangChain + Ollama")
+    st.caption("Built with Streamlit + LangChain")
 
 # Calculate dynamic scores based on inputs
 def calculate_risk_score():
@@ -343,7 +443,7 @@ if not pci_compliant: vulnerabilities += 3
 if not soc2_compliant: vulnerabilities += 2
 
 # Main content area - using shorter tab labels for mobile
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🔍 Assess", "🏗️ Architecture", "📋 Reports", "⚙️ Settings"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Dashboard", "🔍 Assess", "🏗️ Architecture", "📋 Reports", "❓ Help", "⚙️ Settings"])
 
 with tab1:
     st.header("Security Overview")
@@ -450,11 +550,16 @@ with tab1:
 with tab2:
     st.header("🤖 AI Agent Assessment")
     
-    # Show mode indicator
+    # Show mode indicator based on current AI engine
     if OLLAMA_AVAILABLE:
         st.success("🟢 **Real AI Mode** - Ollama connected! Responses are generated by local LLM.")
+        current_ai_mode = "ollama"
+    elif GROQ_AVAILABLE:
+        st.success("☁️ **Cloud AI Mode** - Groq connected! Responses are generated by cloud LLM.")
+        current_ai_mode = "groq"
     else:
-        st.info("🔵 **Demo Mode** - Simulated agent. Run `ollama serve` locally for real AI.")
+        st.info("🔵 **Demo Mode** - Simulated agent responses for demonstration purposes.")
+        current_ai_mode = "simulation"
     
     st.markdown("Enter your security question and watch the agent analyze it.")
     
@@ -506,20 +611,8 @@ with tab2:
 - Current Risk Score: {overall_risk_score}/100 ({overall_status} Risk)
 """
             
-            # === REAL OLLAMA MODE ===
-            if OLLAMA_AVAILABLE and selected_model:
-                st.subheader("🧠 Real Agent Reasoning")
-                
-                # Step 1: Analyze Query
-                with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
-                    st.markdown(f"**Query:** {assessment_query}")
-                    st.markdown(f"**Model:** {selected_model}")
-                    st.markdown(f"**Context:** Using your security profile from sidebar")
-                    time.sleep(0.5)
-                    status.update(label="Step 1: Query Analysis ✅", state="complete")
-                
-                # Step 2: Build prompt
-                full_prompt = f"""Analyze this security question for a {industry_sector} organization:
+            # Build the full prompt (used by both Ollama and Groq)
+            full_prompt = f"""Analyze this security question for a {industry_sector} organization:
 
 **Question:** {assessment_query}
 
@@ -531,7 +624,19 @@ with tab2:
 
 Be specific and actionable. Reference their actual metrics where relevant."""
 
-                # Step 3: Stream response from Ollama
+            # === REAL OLLAMA MODE ===
+            if current_ai_mode == "ollama" and selected_model:
+                st.subheader("🧠 Real Agent Reasoning")
+                
+                # Step 1: Analyze Query
+                with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
+                    st.markdown(f"**Query:** {assessment_query}")
+                    st.markdown(f"**Model:** {selected_model}")
+                    st.markdown(f"**Context:** Using your security profile from sidebar")
+                    time.sleep(0.5)
+                    status.update(label="Step 1: Query Analysis ✅", state="complete")
+                
+                # Step 2: Stream response from Ollama
                 with st.status("🔄 Step 2: Agent reasoning with LLM...", expanded=True) as status:
                     st.markdown("**Sending to local LLM...**")
                     time.sleep(0.3)
@@ -553,11 +658,52 @@ Be specific and actionable. Reference their actual metrics where relevant."""
                 # Agent Summary
                 with st.expander("🤖 Agent Metadata"):
                     st.markdown(f"""
-**Mode:** Real AI (Ollama)
+**Mode:** Real AI (Ollama - Local)
 **Model:** {selected_model}
 **Query:** {assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}
 **Context Provided:** Security profile from sidebar
 **Data Privacy:** ✅ All processing done locally - no data sent to cloud
+                    """)
+            
+            # === GROQ CLOUD MODE ===
+            elif current_ai_mode == "groq" and selected_model:
+                st.subheader("☁️ Cloud Agent Reasoning")
+                
+                # Step 1: Analyze Query
+                with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
+                    st.markdown(f"**Query:** {assessment_query}")
+                    st.markdown(f"**Model:** {GROQ_MODELS.get(selected_model, selected_model)}")
+                    st.markdown(f"**Context:** Using your security profile from sidebar")
+                    time.sleep(0.5)
+                    status.update(label="Step 1: Query Analysis ✅", state="complete")
+                
+                # Step 2: Stream response from Groq
+                with st.status("🔄 Step 2: Agent reasoning with Cloud LLM...", expanded=True) as status:
+                    st.markdown("**Sending to Groq Cloud API...**")
+                    time.sleep(0.3)
+                    status.update(label="Step 2: Cloud LLM Processing ✅", state="complete")
+                
+                st.subheader("📋 Agent Response")
+                
+                # Stream the response
+                response_container = st.empty()
+                full_response = ""
+                
+                with st.spinner("☁️ Generating response from cloud..."):
+                    for chunk in query_groq_streaming(full_prompt, selected_model, security_context):
+                        full_response += chunk
+                        response_container.markdown(full_response + "▌")
+                
+                response_container.markdown(full_response)
+                
+                # Agent Summary
+                with st.expander("🤖 Agent Metadata"):
+                    st.markdown(f"""
+**Mode:** Real AI (Groq - Cloud)
+**Model:** {GROQ_MODELS.get(selected_model, selected_model)}
+**Query:** {assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}
+**Context Provided:** Security profile from sidebar
+**API:** Groq Cloud (console.groq.com)
                     """)
             
             # === SIMULATION MODE ===
@@ -996,6 +1142,158 @@ with tab4:
             st.divider()
 
 with tab5:
+    st.header("❓ Help & Setup")
+    
+    # Current Mode Status
+    st.subheader("🔌 Current Mode")
+    if OLLAMA_AVAILABLE:
+        st.success("✅ **Real AI Mode** - Ollama is connected and running!")
+        st.markdown(f"**Models available:** {', '.join(OLLAMA_MODELS) if OLLAMA_MODELS else 'llama3.2'}")
+    else:
+        st.info("🔵 **Demo Mode** - Using simulation. Responses are based on your sidebar inputs.")
+        st.markdown("To enable real AI, install and run Ollama locally (see below).")
+    
+    st.divider()
+    
+    # Sample Queries
+    st.subheader("💬 Sample Queries to Try")
+    
+    queries = {
+        "🔐 Authentication": [
+            "Analyze our MFA implementation and identify gaps",
+            "What are the risks of 8-character passwords?",
+            "How can we improve session management?",
+        ],
+        "📋 Compliance": [
+            "Are we meeting PCI-DSS requirement 8.3?",
+            "What SOC 2 controls are we missing?",
+            "Generate a GDPR compliance checklist",
+        ],
+        "📊 Risk Assessment": [
+            "What should we prioritize first?",
+            "Create a 90-day security roadmap",
+            "What's the business impact of ransomware?",
+        ],
+        "🚨 Incident Response": [
+            "What's a good incident response plan for a breach?",
+            "What should we do in the first 24 hours of a breach?",
+            "Create a ransomware response playbook",
+        ],
+    }
+    
+    for category, query_list in queries.items():
+        with st.expander(category):
+            for q in query_list:
+                st.code(q, language=None)
+    
+    st.divider()
+    
+    # How to Use
+    st.subheader("📖 How to Use This App")
+    
+    st.markdown("""
+    **Step 1: Configure Your Profile**
+    - Open the sidebar (click `>` top-left)
+    - Enter your organization's security settings
+    - Watch the dashboard update in real-time
+    
+    **Step 2: Run an Assessment**
+    - Go to the **🔍 Assess** tab
+    - Select a sample query or type your own
+    - Click **Run Assessment**
+    - View the agent's reasoning and recommendations
+    
+    **Step 3: Review Results**
+    - Findings are personalized to YOUR inputs
+    - Recommendations include timelines and impact scores
+    - Use these for your security roadmap
+    """)
+    
+    st.divider()
+    
+    # Local Setup Instructions
+    st.subheader("🖥️ Run With Real AI (Local Setup)")
+    
+    st.markdown("To enable real AI-powered responses, run Ollama locally:")
+    
+    with st.expander("📦 Installation Instructions", expanded=False):
+        st.markdown("""
+        **1. Install Ollama**
+        """)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**Mac**")
+            st.code("brew install ollama", language="bash")
+        with col2:
+            st.markdown("**Linux**")
+            st.code("curl -fsSL https://ollama.com/install.sh | sh", language="bash")
+        with col3:
+            st.markdown("**Windows**")
+            st.markdown("[Download installer](https://ollama.com/download)")
+        
+        st.markdown("""
+        **2. Download a Model**
+        """)
+        st.code("ollama pull llama3.2", language="bash")
+        
+        st.markdown("""
+        **3. Start Ollama**
+        """)
+        st.code("ollama serve", language="bash")
+        
+        st.markdown("""
+        **4. Run the App Locally**
+        """)
+        st.code("""git clone https://github.com/rheacisa/financial-resilience-agent
+cd financial-resilience-agent
+pip install -r requirements.txt
+streamlit run app.py""", language="bash")
+        
+        st.success("Once Ollama is running, refresh this page to see '✅ Real AI Mode'!")
+    
+    st.divider()
+    
+    # FAQ
+    st.subheader("🤔 FAQ")
+    
+    with st.expander("What is an agent vs a chatbot?"):
+        st.markdown("""
+        A **chatbot** just responds to prompts. An **agent** has autonomy - it can:
+        - Reason about a task
+        - Decide which tools to use
+        - Execute tools and observe results
+        - Iterate until the task is complete
+        
+        This app uses the **ReAct pattern**: Reason → Act → Observe → Repeat
+        """)
+    
+    with st.expander("Why use local LLMs instead of OpenAI?"):
+        st.markdown("""
+        **For financial institutions:**
+        - 🔒 **Data Sovereignty** - Sensitive data never leaves your infrastructure
+        - 📋 **Compliance** - Meets PCI-DSS, SOC 2, GDPR requirements
+        - 💰 **Cost** - No per-token API costs
+        - ⚡ **Latency** - Faster responses without network round-trips
+        """)
+    
+    with st.expander("Is the demo using real AI?"):
+        st.markdown(f"""
+        **Current mode:** {"✅ Real AI (Ollama)" if OLLAMA_AVAILABLE else "🔵 Simulation"}
+        
+        {"The app is connected to Ollama and generating real AI responses!" if OLLAMA_AVAILABLE else "The cloud demo uses simulation - responses are based on your sidebar inputs, not actual AI reasoning. Run locally with Ollama for real AI!"}
+        """)
+    
+    with st.expander("What would you add next?"):
+        st.markdown("""
+        **Roadmap ideas:**
+        1. **RAG** - Connect to internal security documentation
+        2. **Real integrations** - Pull from Nessus, Qualys, SIEM logs
+        3. **Multi-agent** - Separate agents for network, identity, compliance
+        4. **Automated remediation** - Execute fixes, not just recommend
+        """)
+
+with tab6:
     st.header("Settings")
     
     # Single column layout for mobile - all stacked
