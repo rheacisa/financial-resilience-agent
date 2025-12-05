@@ -443,7 +443,7 @@ if not pci_compliant: vulnerabilities += 3
 if not soc2_compliant: vulnerabilities += 2
 
 # Main content area - using shorter tab labels for mobile
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Dashboard", "🔍 Assess", "🏗️ Architecture", "📋 Reports", "❓ Help", "⚙️ Settings"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Dashboard", "🔍 Assess", "🔐 Security", "🏗️ Architecture", "📋 Reports", "❓ Help", "⚙️ Settings"])
 
 with tab1:
     st.header("Security Overview")
@@ -947,6 +947,149 @@ Implementing all recommendations will improve your risk score from **{overall_ri
             st.warning("Please describe what you'd like to assess.")
 
 with tab3:
+    st.header("🔐 Security Features")
+    
+    st.markdown("Comprehensive overview of security capabilities and controls evaluated by this agent.")
+    
+    # Authentication & Access Control
+    st.subheader("🔑 Authentication & Access Control")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **Multi-Factor Authentication (MFA)**
+        - SMS/Email verification
+        - Authenticator apps (TOTP)
+        - Hardware security keys (FIDO2)
+        - Biometric authentication
+        - Risk-based adaptive MFA
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Single Sign-On (SSO)**
+        - SAML 2.0 integration
+        - OAuth 2.0 / OpenID Connect
+        - Active Directory federation
+        - Session management controls
+        - Just-in-time provisioning
+        """)
+    
+    st.divider()
+    
+    # Data Protection
+    st.subheader("🛡️ Data Protection")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **Encryption Standards**
+        - AES-256 at rest
+        - TLS 1.3 in transit
+        - End-to-end encryption
+        - Key management (HSM)
+        - Certificate lifecycle
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Access Controls**
+        - Role-based access (RBAC)
+        - Attribute-based access (ABAC)
+        - Least privilege principle
+        - Data classification
+        - DLP policies
+        """)
+    
+    st.divider()
+    
+    # Network Security
+    st.subheader("🌐 Network Security")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **Perimeter Defense**
+        - Web Application Firewall (WAF)
+        - Next-gen firewalls (NGFW)
+        - DDoS protection
+        - Intrusion Detection (IDS/IPS)
+        - Network segmentation
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Monitoring & Detection**
+        - SIEM integration
+        - 24/7 SOC monitoring
+        - Threat intelligence feeds
+        - Anomaly detection
+        - Network flow analysis
+        """)
+    
+    st.divider()
+    
+    # Compliance Frameworks
+    st.subheader("📜 Compliance Frameworks")
+    
+    frameworks = {
+        "PCI-DSS": "Payment Card Industry Data Security Standard - Required for organizations handling credit card data",
+        "SOC 2": "Service Organization Control 2 - Trust service criteria for security, availability, and confidentiality",
+        "GDPR": "General Data Protection Regulation - EU data privacy and protection requirements",
+        "NIST CSF": "Cybersecurity Framework - Identify, Protect, Detect, Respond, Recover",
+        "ISO 27001": "Information Security Management System - International security standard",
+        "FFIEC": "Federal Financial Institutions Examination Council - US financial institution guidelines"
+    }
+    
+    for framework, description in frameworks.items():
+        with st.expander(f"✅ {framework}"):
+            st.markdown(description)
+    
+    st.divider()
+    
+    # Incident Response
+    st.subheader("🚨 Incident Response")
+    
+    st.markdown("""
+    **Response Capabilities Evaluated:**
+    
+    | Phase | Key Activities |
+    |-------|----------------|
+    | **Preparation** | Playbooks, tabletop exercises, contact lists |
+    | **Detection** | Alert triage, threat hunting, log analysis |
+    | **Containment** | Isolation procedures, evidence preservation |
+    | **Eradication** | Root cause analysis, malware removal |
+    | **Recovery** | System restoration, monitoring enhancement |
+    | **Lessons Learned** | Post-incident review, control improvements |
+    """)
+    
+    st.divider()
+    
+    # Vulnerability Management
+    st.subheader("🔍 Vulnerability Management")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **Assessment Types**
+        - Automated vulnerability scans
+        - Penetration testing
+        - Code security reviews
+        - Configuration audits
+        - Third-party assessments
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Remediation Process**
+        - Risk-based prioritization
+        - SLA-driven patching
+        - Compensating controls
+        - Exception management
+        - Verification testing
+        """)
+
+with tab4:
     st.header("🏗️ System Architecture")
     
     st.markdown("Understanding the agent design and technology choices.")
@@ -1119,7 +1262,7 @@ while not task_complete:
 - Reduced bandwidth costs
     """)
 
-with tab4:
+with tab5:
     st.header("Reports")
     
     st.markdown("View and download previous assessments.")
@@ -1141,7 +1284,7 @@ with tab4:
             st.button("📥 Download", key=f"download_{report['date']}", use_container_width=True)
             st.divider()
 
-with tab5:
+with tab6:
     st.header("❓ Help & Setup")
     
     # Current Mode Status
@@ -1293,7 +1436,7 @@ streamlit run app.py""", language="bash")
         4. **Automated remediation** - Execute fixes, not just recommend
         """)
 
-with tab6:
+with tab7:
     st.header("Settings")
     
     # Single column layout for mobile - all stacked
