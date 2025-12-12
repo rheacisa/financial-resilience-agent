@@ -5,13 +5,13 @@ from datetime import datetime
 import requests
 
 # --- Configuration ---
-XAI_API_KEY = os.environ.get("XAI_API_KEY") or st.secrets.get("XAI_API_KEY", None)
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", None)
 
-# Available Grok (xAI) models
-GROK_MODELS = {
-    "grok-3": "Grok 3 (Most capable)",
-    "grok-3-fast": "Grok 3 Fast (Balanced)",
-    "grok-2": "Grok 2 (Previous gen)",
+# Available Claude models
+CLAUDE_MODELS = {
+    "claude-sonnet-4-20250514": "Claude Sonnet 4 (Best balance)",
+    "claude-3-5-haiku-20241022": "Claude 3.5 Haiku (Fastest)",
+    "claude-opus-4-20250514": "Claude Opus 4 (Most capable)",
 }
 
 # System prompt for security agent
@@ -28,10 +28,10 @@ Provide specific, actionable recommendations with risk levels (High/Medium/Low) 
 Format your response with clear sections using markdown headers (###).
 Be concise but thorough. Use bullet points and tables when helpful."""
 
-# --- Grok (xAI) Integration ---
-def query_grok(prompt, model="grok-3", context=None):
-    """Send a query to xAI Grok API and get response"""
-    if not XAI_API_KEY:
+# --- Claude (Anthropic) Integration ---
+def query_claude(prompt, model="claude-sonnet-4-20250514", context=None):
+    """Send a query to Anthropic Claude API and get response"""
+    if not ANTHROPIC_API_KEY:
         return None
     
     try:
@@ -40,34 +40,34 @@ def query_grok(prompt, model="grok-3", context=None):
             system += f"\n\nCurrent Security Profile:\n{context}"
         
         response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
             headers={
-                "Authorization": f"Bearer {XAI_API_KEY}",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json"
             },
             json={
                 "model": model,
+                "max_tokens": 2048,
+                "system": system,
                 "messages": [
-                    {"role": "system", "content": system},
                     {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 2048
+                ]
             },
             timeout=60
         )
         
         if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
+            return response.json()["content"][0]["text"]
         else:
             return f"Error: {response.status_code} - {response.text}"
     except Exception as e:
         return f"Error: {str(e)}"
 
-def query_grok_streaming(prompt, model="grok-3", context=None):
-    """Send a query to xAI Grok API and stream the response"""
-    if not XAI_API_KEY:
-        yield "Error: No xAI API key configured"
+def query_claude_streaming(prompt, model="claude-sonnet-4-20250514", context=None):
+    """Send a query to Anthropic Claude API and stream the response"""
+    if not ANTHROPIC_API_KEY:
+        yield "Error: No Anthropic API key configured"
         return
     
     try:
@@ -76,19 +76,19 @@ def query_grok_streaming(prompt, model="grok-3", context=None):
             system += f"\n\nCurrent Security Profile:\n{context}"
         
         response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
             headers={
-                "Authorization": f"Bearer {XAI_API_KEY}",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json"
             },
             json={
                 "model": model,
+                "max_tokens": 2048,
+                "system": system,
                 "messages": [
-                    {"role": "system", "content": system},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.7,
-                "max_tokens": 2048,
                 "stream": True
             },
             stream=True,
@@ -101,13 +101,12 @@ def query_grok_streaming(prompt, model="grok-3", context=None):
                     line_text = line.decode('utf-8')
                     if line_text.startswith("data: "):
                         data_str = line_text[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
                         try:
                             data = json.loads(data_str)
-                            delta = data.get("choices", [{}])[0].get("delta", {})
-                            if "content" in delta:
-                                yield delta["content"]
+                            if data.get("type") == "content_block_delta":
+                                delta = data.get("delta", {})
+                                if "text" in delta:
+                                    yield delta["text"]
                         except json.JSONDecodeError:
                             continue
         else:
@@ -168,13 +167,13 @@ def query_ollama_streaming(prompt, model="llama3.2", context=None):
 # Check availability at startup
 OLLAMA_AVAILABLE = check_ollama_available()
 OLLAMA_MODELS = get_ollama_models() if OLLAMA_AVAILABLE else []
-GROK_AVAILABLE = bool(XAI_API_KEY)
+CLAUDE_AVAILABLE = bool(ANTHROPIC_API_KEY)
 
-# Determine active mode priority: Ollama (local/production) > Grok (cloud demo) > Simulation
+# Determine active mode priority: Ollama (local/production) > Claude (cloud) > Simulation
 if OLLAMA_AVAILABLE:
     ACTIVE_MODE = "ollama"
-elif GROK_AVAILABLE:
-    ACTIVE_MODE = "grok"
+elif CLAUDE_AVAILABLE:
+    ACTIVE_MODE = "claude"
 else:
     ACTIVE_MODE = "simulation"
 
@@ -354,19 +353,19 @@ with st.sidebar:
             help="Choose which local LLM to use"
         )
         st.caption("🏠 Running locally - production ready!")
-    elif GROK_AVAILABLE:
-        st.success("✅ Grok (xAI) Cloud Connected")
-        ai_mode = "grok"
-        model_options = list(GROK_MODELS.keys())
-        model_labels = list(GROK_MODELS.values())
+    elif CLAUDE_AVAILABLE:
+        st.success("✅ Claude (Anthropic) Connected")
+        ai_mode = "claude"
+        model_options = list(CLAUDE_MODELS.keys())
+        model_labels = list(CLAUDE_MODELS.values())
         selected_idx = st.selectbox(
             "Select Model",
             range(len(model_options)),
             format_func=lambda i: model_labels[i],
-            help="Choose which Grok model to use"
+            help="Choose which Claude model to use"
         )
         selected_model = model_options[selected_idx]
-        st.caption("☁️ Grok Cloud AI - great for demos!")
+        st.caption("☁️ Claude AI - excellent for analysis!")
     else:
         st.info("🎭 Simulation Mode")
         st.caption("No AI backend detected")
@@ -380,9 +379,9 @@ with st.sidebar:
             ollama serve
             ```
             
-            **Option 2: Cloud (Grok/xAI)**
-            1. Get free API key at [console.x.ai](https://console.x.ai)
-            2. Add `XAI_API_KEY` to Streamlit secrets
+            **Option 2: Cloud (Claude)**
+            1. Get API key at [console.anthropic.com](https://console.anthropic.com)
+            2. Add `ANTHROPIC_API_KEY` to Streamlit secrets
             """)
     
     st.divider()
@@ -554,9 +553,9 @@ with tab2:
     if OLLAMA_AVAILABLE:
         st.success("🟢 **Real AI Mode** - Ollama connected! Responses are generated by local LLM.")
         current_ai_mode = "ollama"
-    elif GROK_AVAILABLE:
-        st.success("☁️ **Cloud AI Mode** - Grok (xAI) connected! Responses are generated by cloud LLM.")
-        current_ai_mode = "grok"
+    elif CLAUDE_AVAILABLE:
+        st.success("☁️ **Cloud AI Mode** - Claude (Anthropic) connected! Responses are generated by cloud LLM.")
+        current_ai_mode = "claude"
     else:
         st.info("🔵 **Demo Mode** - Simulated agent responses for demonstration purposes.")
         current_ai_mode = "simulation"
@@ -611,7 +610,7 @@ with tab2:
 - Current Risk Score: {overall_risk_score}/100 ({overall_status} Risk)
 """
             
-            # Build the full prompt (used by both Ollama and Grok)
+            # Build the full prompt (used by both Ollama and Claude)
             full_prompt = f"""Analyze this security question for a {industry_sector} organization:
 
 **Question:** {assessment_query}
@@ -665,21 +664,21 @@ Be specific and actionable. Reference their actual metrics where relevant."""
 **Data Privacy:** ✅ All processing done locally - no data sent to cloud
                     """)
             
-            # === GROK CLOUD MODE ===
-            elif current_ai_mode == "grok" and selected_model:
+            # === CLAUDE CLOUD MODE ===
+            elif current_ai_mode == "claude" and selected_model:
                 st.subheader("☁️ Cloud Agent Reasoning")
                 
                 # Step 1: Analyze Query
                 with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
                     st.markdown(f"**Query:** {assessment_query}")
-                    st.markdown(f"**Model:** {GROK_MODELS.get(selected_model, selected_model)}")
+                    st.markdown(f"**Model:** {CLAUDE_MODELS.get(selected_model, selected_model)}")
                     st.markdown(f"**Context:** Using your security profile from sidebar")
                     time.sleep(0.5)
                     status.update(label="Step 1: Query Analysis ✅", state="complete")
                 
-                # Step 2: Stream response from Grok
+                # Step 2: Stream response from Claude
                 with st.status("🔄 Step 2: Agent reasoning with Cloud LLM...", expanded=True) as status:
-                    st.markdown("**Sending to Grok (xAI) API...**")
+                    st.markdown("**Sending to Claude (Anthropic) API...**")
                     time.sleep(0.3)
                     status.update(label="Step 2: Cloud LLM Processing ✅", state="complete")
                 
@@ -689,8 +688,8 @@ Be specific and actionable. Reference their actual metrics where relevant."""
                 response_container = st.empty()
                 full_response = ""
                 
-                with st.spinner("☁️ Generating response from Grok..."):
-                    for chunk in query_grok_streaming(full_prompt, selected_model, security_context):
+                with st.spinner("☁️ Generating response from Claude..."):
+                    for chunk in query_claude_streaming(full_prompt, selected_model, security_context):
                         full_response += chunk
                         response_container.markdown(full_response + "▌")
                 
@@ -699,11 +698,11 @@ Be specific and actionable. Reference their actual metrics where relevant."""
                 # Agent Summary
                 with st.expander("🤖 Agent Metadata"):
                     st.markdown(f"""
-**Mode:** Real AI (Grok - xAI Cloud)
-**Model:** {GROK_MODELS.get(selected_model, selected_model)}
+**Mode:** Real AI (Claude - Anthropic)
+**Model:** {CLAUDE_MODELS.get(selected_model, selected_model)}
 **Query:** {assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}
 **Context Provided:** Security profile from sidebar
-**API:** Grok xAI (console.x.ai)
+**API:** Anthropic (console.anthropic.com)
                     """)
             
             # === SIMULATION MODE ===
