@@ -5,13 +5,13 @@ from datetime import datetime
 import requests
 
 # --- Configuration ---
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+XAI_API_KEY = os.environ.get("XAI_API_KEY") or st.secrets.get("XAI_API_KEY", None)
 
-# Available Groq models
-GROQ_MODELS = {
-    "llama-3.3-70b-versatile": "Llama 3.3 70B (Best quality)",
-    "llama-3.1-8b-instant": "Llama 3.1 8B (Fastest)",
-    "mixtral-8x7b-32768": "Mixtral 8x7B (Long context)",
+# Available Grok (xAI) models
+GROK_MODELS = {
+    "grok-3": "Grok 3 (Most capable)",
+    "grok-3-fast": "Grok 3 Fast (Balanced)",
+    "grok-2": "Grok 2 (Previous gen)",
 }
 
 # System prompt for security agent
@@ -28,10 +28,10 @@ Provide specific, actionable recommendations with risk levels (High/Medium/Low) 
 Format your response with clear sections using markdown headers (###).
 Be concise but thorough. Use bullet points and tables when helpful."""
 
-# --- Groq Integration ---
-def query_groq(prompt, model="llama-3.3-70b-versatile", context=None):
-    """Send a query to Groq API and get response"""
-    if not GROQ_API_KEY:
+# --- Grok (xAI) Integration ---
+def query_grok(prompt, model="grok-3", context=None):
+    """Send a query to xAI Grok API and get response"""
+    if not XAI_API_KEY:
         return None
     
     try:
@@ -40,9 +40,9 @@ def query_groq(prompt, model="llama-3.3-70b-versatile", context=None):
             system += f"\n\nCurrent Security Profile:\n{context}"
         
         response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
+            "https://api.x.ai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {XAI_API_KEY}",
                 "Content-Type": "application/json"
             },
             json={
@@ -64,10 +64,10 @@ def query_groq(prompt, model="llama-3.3-70b-versatile", context=None):
     except Exception as e:
         return f"Error: {str(e)}"
 
-def query_groq_streaming(prompt, model="llama-3.3-70b-versatile", context=None):
-    """Send a query to Groq API and stream the response"""
-    if not GROQ_API_KEY:
-        yield "Error: No Groq API key configured"
+def query_grok_streaming(prompt, model="grok-3", context=None):
+    """Send a query to xAI Grok API and stream the response"""
+    if not XAI_API_KEY:
+        yield "Error: No xAI API key configured"
         return
     
     try:
@@ -76,9 +76,9 @@ def query_groq_streaming(prompt, model="llama-3.3-70b-versatile", context=None):
             system += f"\n\nCurrent Security Profile:\n{context}"
         
         response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
+            "https://api.x.ai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {XAI_API_KEY}",
                 "Content-Type": "application/json"
             },
             json={
@@ -168,13 +168,13 @@ def query_ollama_streaming(prompt, model="llama3.2", context=None):
 # Check availability at startup
 OLLAMA_AVAILABLE = check_ollama_available()
 OLLAMA_MODELS = get_ollama_models() if OLLAMA_AVAILABLE else []
-GROQ_AVAILABLE = bool(GROQ_API_KEY)
+GROK_AVAILABLE = bool(XAI_API_KEY)
 
-# Determine active mode priority: Ollama (local/production) > Groq (cloud demo) > Simulation
+# Determine active mode priority: Ollama (local/production) > Grok (cloud demo) > Simulation
 if OLLAMA_AVAILABLE:
     ACTIVE_MODE = "ollama"
-elif GROQ_AVAILABLE:
-    ACTIVE_MODE = "groq"
+elif GROK_AVAILABLE:
+    ACTIVE_MODE = "grok"
 else:
     ACTIVE_MODE = "simulation"
 
@@ -354,19 +354,19 @@ with st.sidebar:
             help="Choose which local LLM to use"
         )
         st.caption("🏠 Running locally - production ready!")
-    elif GROQ_AVAILABLE:
-        st.success("✅ Groq Cloud Connected")
-        ai_mode = "groq"
-        model_options = list(GROQ_MODELS.keys())
-        model_labels = list(GROQ_MODELS.values())
+    elif GROK_AVAILABLE:
+        st.success("✅ Grok (xAI) Cloud Connected")
+        ai_mode = "grok"
+        model_options = list(GROK_MODELS.keys())
+        model_labels = list(GROK_MODELS.values())
         selected_idx = st.selectbox(
             "Select Model",
             range(len(model_options)),
             format_func=lambda i: model_labels[i],
-            help="Choose which cloud LLM to use"
+            help="Choose which Grok model to use"
         )
         selected_model = model_options[selected_idx]
-        st.caption("☁️ Cloud AI - great for demos!")
+        st.caption("☁️ Grok Cloud AI - great for demos!")
     else:
         st.info("🎭 Simulation Mode")
         st.caption("No AI backend detected")
@@ -380,9 +380,9 @@ with st.sidebar:
             ollama serve
             ```
             
-            **Option 2: Cloud (Groq)**
-            1. Get free API key at [console.groq.com](https://console.groq.com)
-            2. Add to Streamlit secrets
+            **Option 2: Cloud (Grok/xAI)**
+            1. Get free API key at [console.x.ai](https://console.x.ai)
+            2. Add `XAI_API_KEY` to Streamlit secrets
             """)
     
     st.divider()
@@ -554,9 +554,9 @@ with tab2:
     if OLLAMA_AVAILABLE:
         st.success("🟢 **Real AI Mode** - Ollama connected! Responses are generated by local LLM.")
         current_ai_mode = "ollama"
-    elif GROQ_AVAILABLE:
-        st.success("☁️ **Cloud AI Mode** - Groq connected! Responses are generated by cloud LLM.")
-        current_ai_mode = "groq"
+    elif GROK_AVAILABLE:
+        st.success("☁️ **Cloud AI Mode** - Grok (xAI) connected! Responses are generated by cloud LLM.")
+        current_ai_mode = "grok"
     else:
         st.info("🔵 **Demo Mode** - Simulated agent responses for demonstration purposes.")
         current_ai_mode = "simulation"
@@ -611,7 +611,7 @@ with tab2:
 - Current Risk Score: {overall_risk_score}/100 ({overall_status} Risk)
 """
             
-            # Build the full prompt (used by both Ollama and Groq)
+            # Build the full prompt (used by both Ollama and Grok)
             full_prompt = f"""Analyze this security question for a {industry_sector} organization:
 
 **Question:** {assessment_query}
@@ -665,21 +665,21 @@ Be specific and actionable. Reference their actual metrics where relevant."""
 **Data Privacy:** ✅ All processing done locally - no data sent to cloud
                     """)
             
-            # === GROQ CLOUD MODE ===
-            elif current_ai_mode == "groq" and selected_model:
+            # === GROK CLOUD MODE ===
+            elif current_ai_mode == "grok" and selected_model:
                 st.subheader("☁️ Cloud Agent Reasoning")
                 
                 # Step 1: Analyze Query
                 with st.status("🔄 Step 1: Analyzing your query...", expanded=True) as status:
                     st.markdown(f"**Query:** {assessment_query}")
-                    st.markdown(f"**Model:** {GROQ_MODELS.get(selected_model, selected_model)}")
+                    st.markdown(f"**Model:** {GROK_MODELS.get(selected_model, selected_model)}")
                     st.markdown(f"**Context:** Using your security profile from sidebar")
                     time.sleep(0.5)
                     status.update(label="Step 1: Query Analysis ✅", state="complete")
                 
-                # Step 2: Stream response from Groq
+                # Step 2: Stream response from Grok
                 with st.status("🔄 Step 2: Agent reasoning with Cloud LLM...", expanded=True) as status:
-                    st.markdown("**Sending to Groq Cloud API...**")
+                    st.markdown("**Sending to Grok (xAI) API...**")
                     time.sleep(0.3)
                     status.update(label="Step 2: Cloud LLM Processing ✅", state="complete")
                 
@@ -689,8 +689,8 @@ Be specific and actionable. Reference their actual metrics where relevant."""
                 response_container = st.empty()
                 full_response = ""
                 
-                with st.spinner("☁️ Generating response from cloud..."):
-                    for chunk in query_groq_streaming(full_prompt, selected_model, security_context):
+                with st.spinner("☁️ Generating response from Grok..."):
+                    for chunk in query_grok_streaming(full_prompt, selected_model, security_context):
                         full_response += chunk
                         response_container.markdown(full_response + "▌")
                 
@@ -699,11 +699,11 @@ Be specific and actionable. Reference their actual metrics where relevant."""
                 # Agent Summary
                 with st.expander("🤖 Agent Metadata"):
                     st.markdown(f"""
-**Mode:** Real AI (Groq - Cloud)
-**Model:** {GROQ_MODELS.get(selected_model, selected_model)}
+**Mode:** Real AI (Grok - xAI Cloud)
+**Model:** {GROK_MODELS.get(selected_model, selected_model)}
 **Query:** {assessment_query[:100]}{'...' if len(assessment_query) > 100 else ''}
 **Context Provided:** Security profile from sidebar
-**API:** Groq Cloud (console.groq.com)
+**API:** Grok xAI (console.x.ai)
                     """)
             
             # === SIMULATION MODE ===
